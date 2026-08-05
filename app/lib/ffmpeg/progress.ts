@@ -17,8 +17,6 @@ import {
 } from './constants';
 import {
   parseTime,
-  formatTime,
-  finiteOr,
 } from './utils';
 
 // =============================================================================

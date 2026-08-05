@@ -2,8 +2,10 @@ import { AI_PROVIDERS } from "./providers";
 
 export type ProviderType = "image" | "voice" | "video" | "text";
 
+type Provider = typeof AI_PROVIDERS[keyof typeof AI_PROVIDERS];
+
 export class ProviderManager {
-  static getImageProviders() {
+  static getImageProviders(): Provider[] {
     return [
       AI_PROVIDERS.huggingface,
       AI_PROVIDERS.together,
@@ -15,7 +17,7 @@ export class ProviderManager {
     ].filter((provider) => provider.apiKey);
   }
 
-  static getVoiceProviders() {
+  static getVoiceProviders(): Provider[] {
     return [
       AI_PROVIDERS.elevenlabs,
       AI_PROVIDERS.deepgram,
@@ -27,7 +29,7 @@ export class ProviderManager {
     ].filter((provider) => provider.apiKey);
   }
 
-  static getVideoProviders() {
+  static getVideoProviders(): Provider[] {
     return [
       AI_PROVIDERS.runway,
       AI_PROVIDERS.pika,
@@ -41,7 +43,7 @@ export class ProviderManager {
     ].filter((provider) => provider.apiKey);
   }
 
-  static getTextProviders() {
+  static getTextProviders(): Provider[] {
     return [
       AI_PROVIDERS.openrouter,
       AI_PROVIDERS.groq,
@@ -50,8 +52,8 @@ export class ProviderManager {
   }
 
   static async tryProviders<T>(
-    providers: any[],
-    callback: (provider: any) => Promise<T>
+    providers: Provider[],
+    callback: (provider: Provider) => Promise<T>
   ): Promise<T> {
     let lastError: unknown;
 

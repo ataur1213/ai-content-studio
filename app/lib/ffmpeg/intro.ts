@@ -210,7 +210,6 @@ async function generateIntroCard(
 
   // Force pixel format for H264 compatibility
   graph.format(currentLabel, 'yuv420p', 'final');
-  const finalLabel = '[final]';
 
   const commandConfig: CommandConfig = {
     binary: ctx.ffmpegPath,

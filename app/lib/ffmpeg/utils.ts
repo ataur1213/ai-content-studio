@@ -9,7 +9,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import type {
-  Timestamp,
   TimeRange,
   Resolution,
   AspectRatio,
@@ -23,7 +22,6 @@ import {
   TEMP_FILE_PREFIX,
   TEMP_VIDEO_EXT,
   TEMP_AUDIO_EXT,
-  TEMP_IMAGE_EXT,
   TEMP_SUBTITLE_EXT,
   TWO_PASS_LOG_EXT,
   ASPECT_RATIOS,
@@ -260,14 +258,67 @@ export function makeEven(resolution: Resolution): Resolution {
 
 /** Synchronously ensure a directory exists (recursive mkdirp). */
 export function ensureDir(dirPath: FilePath): void {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+  if (fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory()) {
+    return;
+  }
+
+  const fileExt = path.extname(dirPath).toLowerCase();
+  const looksLikeFile =
+    fileExt === '.mp4' ||
+    fileExt === '.webm' ||
+    fileExt === '.mkv' ||
+    fileExt === '.avi' ||
+    fileExt === '.mov' ||
+    fileExt === '.gif' ||
+    fileExt === '.mp3' ||
+    fileExt === '.aac' ||
+    fileExt === '.wav' ||
+    fileExt === '.ogg' ||
+    fileExt === '.flac' ||
+    fileExt === '.png' ||
+    fileExt === '.jpg' ||
+    fileExt === '.jpeg' ||
+    fileExt === '.webp' ||
+    fileExt === '.srt' ||
+    fileExt === '.ass' ||
+    fileExt === '.vtt' ||
+    fileExt === '.txt' ||
+    fileExt === '.log';
+
+  const targetDir = looksLikeFile ? path.dirname(dirPath) : dirPath;
+
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
 }
 
 /** Asynchronously ensure a directory exists (recursive mkdirp). */
 export async function ensureDirAsync(dirPath: FilePath): Promise<void> {
-  await fs.promises.mkdir(dirPath, { recursive: true });
+  const fileExt = path.extname(dirPath).toLowerCase();
+  const looksLikeFile =
+    fileExt === '.mp4' ||
+    fileExt === '.webm' ||
+    fileExt === '.mkv' ||
+    fileExt === '.avi' ||
+    fileExt === '.mov' ||
+    fileExt === '.gif' ||
+    fileExt === '.mp3' ||
+    fileExt === '.aac' ||
+    fileExt === '.wav' ||
+    fileExt === '.ogg' ||
+    fileExt === '.flac' ||
+    fileExt === '.png' ||
+    fileExt === '.jpg' ||
+    fileExt === '.jpeg' ||
+    fileExt === '.webp' ||
+    fileExt === '.srt' ||
+    fileExt === '.ass' ||
+    fileExt === '.vtt' ||
+    fileExt === '.txt' ||
+    fileExt === '.log';
+
+  const targetDir = looksLikeFile ? path.dirname(dirPath) : dirPath;
+  await fs.promises.mkdir(targetDir, { recursive: true });
 }
 
 /** Check if a file exists. */

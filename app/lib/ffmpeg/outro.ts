@@ -204,7 +204,6 @@ async function generateOutroCard(
   }
 
   graph.format(currentLabel, 'yuv420p', 'final');
-  const finalLabel = '[final]';
 
   const commandConfig: CommandConfig = {
     binary: ctx.ffmpegPath,

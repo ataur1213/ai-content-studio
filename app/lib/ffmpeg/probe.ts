@@ -144,11 +144,9 @@ async function executeProbe(
 
     return mapToMediaInfo(rawData, absPath);
   } catch (err) {
-    // Re-throw our custom errors directly
-    if (err instanceof Error && err.message.startsWith('FFmpegError:')) {
+    if (err instanceof FFmpegProbeError) {
       throw err;
     }
-    // Wrap unexpected errors
     const errMsg = err instanceof Error ? err.message : String(err);
     throw createProbeError(
       `ffprobe process failed: ${errMsg}`,
@@ -377,25 +375,45 @@ function parseRotation(tags: Record<string, string> | undefined): number {
   return isFinite(num) ? num : 0;
 }
 
-// =============================================================================
-// Error Handling
-// =============================================================================
+export class FFmpegProbeError extends Error implements FFmpegError {
+  public readonly code: string;
+  public readonly stderr: string;
+  public readonly exitCode: number | null;
+  public readonly command: string[];
+  public readonly timestamp: number;
 
-/** Create a standardized FFmpegError for probe failures. */
+  constructor(
+    message: string,
+    code: string,
+    stderr: string,
+    command: string[],
+    exitCode: number | null = null,
+    timestamp?: number,
+  ) {
+    super(message);
+    this.name = 'FFmpegProbeError';
+    this.code = code;
+    this.stderr = stderr;
+    this.exitCode = exitCode;
+    this.command = command;
+    this.timestamp = timestamp ?? Date.now();
+    Object.setPrototypeOf(this, FFmpegProbeError.prototype);
+  }
+}
+
 function createProbeError(
   message: string,
   code: string,
   stderrLines: string[],
   binary: FilePath,
-): FFmpegError {
-  return {
-    code,
+): FFmpegProbeError {
+  return new FFmpegProbeError(
     message,
-    stderr: stderrLines.join('\n').slice(0, MAX_STDERR_BUFFER),
-    exitCode: null,
-    command: [binary],
-    timestamp: Date.now(),
-  };
+    code,
+    stderrLines.join('\n').slice(0, MAX_STDERR_BUFFER),
+    [binary],
+    null,
+  );
 }
 
 // =============================================================================

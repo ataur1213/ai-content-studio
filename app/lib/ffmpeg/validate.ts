@@ -12,21 +12,24 @@ import type {
   AudioCodec,
   VideoFormat,
   AudioFormat,
-  ImageFormat,
   SubtitleFormat,
-  TransitionType,
   KenBurnsDirection,
-  AnchorPosition,
   AnimationType,
   WatermarkConfig,
   TextWatermarkConfig,
   ImageWatermarkConfig,
-  VideoMetadata,
   ValidationError,
   ValidationResult,
   RenderConfig,
   StudioConfig,
   SubtitleConfig,
+  SubtitleEntry,
+  SubtitleStyle,
+  PopupCaptionConfig,
+  EmojiAnimationConfig,
+  DynamicSubtitlesConfig,
+  SubtitleOverlayEntry,
+  SubtitlePipelineConfig,
   TimelineClip,
   ComposeConfig,
   ImageToVideoConfig,
@@ -43,6 +46,9 @@ import type {
   WatermarkOperation,
   IntroConfig,
   OutroConfig,
+  SmartCrop916Config,
+  AutoReframe916Config,
+  DynamicZoomConfig,
 } from './types';
 import {
   MIN_RESOLUTION_WIDTH,
@@ -53,14 +59,11 @@ import {
   MAX_FPS,
   MIN_CRF,
   MAX_CRF,
-  MAX_THUMBNAIL_SOURCE_SIZE,
   MAX_COMPOSE_CLIPS,
   MAX_OVERLAYS,
   MAX_SUBTITLE_ENTRIES,
   MAX_AUDIO_TRACKS,
   VALID_TRANSITION_TYPES,
-  DEFAULT_RENDER_CONFIG,
-  DEFAULT_STUDIO_CONFIG,
   VIDEO_FORMAT_MAP,
   AUDIO_FORMAT_MAP,
   CODEC_PIXEL_FORMATS,
@@ -69,7 +72,6 @@ import {
   fileExists,
   getFileExtension,
   isPlainObject,
-  finiteOr,
 } from './utils';
 
 // =============================================================================
@@ -216,6 +218,62 @@ export function validateFps(fps: number, field: string = 'fps'): ValidationResul
 /** Validate CRF value. */
 export function validateCrf(crf: number, field: string = 'crf'): ValidationResult {
   return validateRange(crf, MIN_CRF, MAX_CRF, field);
+}
+
+export function validateSmartCrop916Config(config: SmartCrop916Config): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'SmartCrop916Config must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateResolution(config.input, 'input').errors);
+  errors.push(...validateResolution(config.output, 'output').errors);
+
+  if (config.focusX !== undefined) {
+    errors.push(...validateRange(config.focusX, 0, 1, 'focusX').errors);
+  }
+  if (config.focusY !== undefined) {
+    errors.push(...validateRange(config.focusY, 0, 1, 'focusY').errors);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateAutoReframe916Config(config: AutoReframe916Config): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'AutoReframe916Config must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateResolution(config.input, 'input').errors);
+  errors.push(...validateResolution(config.output, 'output').errors);
+
+  if (config.focusX !== undefined) {
+    errors.push(...validateRange(config.focusX, 0, 1, 'focusX').errors);
+  }
+  if (config.focusY !== undefined) {
+    errors.push(...validateRange(config.focusY, 0, 1, 'focusY').errors);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateDynamicZoomConfig(config: DynamicZoomConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'DynamicZoomConfig must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateResolution(config.baseResolution, 'baseResolution').errors);
+  errors.push(...validateRange(config.durationSec, 0.01, 24 * 60 * 60, 'durationSec').errors);
+  errors.push(...validateRange(config.zoomAmount, 0, 1, 'zoomAmount').errors);
+  errors.push(...validateEnum(config.mode, ['in', 'out', 'in-out', 'out-in'], 'mode').errors);
+
+  if (config.focusX !== undefined) {
+    errors.push(...validateRange(config.focusX, 0, 1, 'focusX').errors);
+  }
+  if (config.focusY !== undefined) {
+    errors.push(...validateRange(config.focusY, 0, 1, 'focusY').errors);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
 }
 
 /** Validate a video codec string. */
@@ -520,7 +578,13 @@ export function validateWatermarkConfig(config: WatermarkConfig): ValidationResu
     errors.push(...validateFileExists(ic.imagePath, 'imagePath', ['png', 'webp', 'jpg', 'jpeg']).errors);
     errors.push(...validateRange(ic.opacity, 0, 1, 'opacity').errors);
   } else {
-    errors.push(createError('type', 'Watermark type must be "text" or "image"', config.type));
+    errors.push(
+      createError(
+        'type',
+        'Watermark type must be "text" or "image"',
+        (config as { type?: unknown }).type,
+      ),
+    );
   }
 
   return errors.length === 0 ? valid() : invalid(...errors);
@@ -568,6 +632,202 @@ export function validateSubtitleConfig(config: SubtitleConfig): ValidationResult
 
   if (config.outputPath !== undefined && config.outputPath !== null) {
     errors.push(...validateNonEmpty(config.outputPath, 'outputPath').errors);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+function validateSubtitleEntryObject(entry: SubtitleEntry, field: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(entry), field, 'Must be an object', entry);
+  if (!isPlainObject(entry)) return errors;
+  pushIf(errors, typeof entry.id !== 'string' || entry.id.trim().length === 0, `${field}.id`, 'Must be a non-empty string', entry.id);
+  pushIf(errors, typeof entry.text !== 'string' || entry.text.trim().length === 0, `${field}.text`, 'Text must be non-empty', entry.text);
+  pushIf(errors, typeof entry.startTime !== 'number' || !isFinite(entry.startTime) || entry.startTime < 0, `${field}.startTime`, 'Must be a finite number >= 0', entry.startTime);
+  pushIf(errors, typeof entry.endTime !== 'number' || !isFinite(entry.endTime) || entry.endTime <= 0, `${field}.endTime`, 'Must be a finite number > 0', entry.endTime);
+  if (typeof entry.startTime === 'number' && typeof entry.endTime === 'number' && isFinite(entry.startTime) && isFinite(entry.endTime)) {
+    pushIf(errors, entry.endTime <= entry.startTime, field, 'endTime must be > startTime', { startTime: entry.startTime, endTime: entry.endTime });
+  }
+  return errors;
+}
+
+function validateSubtitleStyleObject(style: SubtitleStyle, field: string = 'style'): ValidationError[] {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(style), field, 'Must be an object', style);
+  if (!isPlainObject(style)) return errors;
+
+  errors.push(...validateNonEmpty(style.fontName, `${field}.fontName`).errors);
+  errors.push(...validateRange(style.fontSize, 8, 256, `${field}.fontSize`).errors);
+  errors.push(...validateNonEmpty(style.primaryColor, `${field}.primaryColor`).errors);
+  errors.push(...validateNonEmpty(style.outlineColor, `${field}.outlineColor`).errors);
+  errors.push(...validateRange(style.outlineWidth, 0, 20, `${field}.outlineWidth`).errors);
+  errors.push(...validateRange(style.shadow, 0, 50, `${field}.shadow`).errors);
+  errors.push(...validateRange(style.alignment, 1, 9, `${field}.alignment`).errors);
+  errors.push(...validateRange(style.marginV, 0, 500, `${field}.marginV`).errors);
+  errors.push(...validateRange(style.marginL, 0, 500, `${field}.marginL`).errors);
+  errors.push(...validateRange(style.marginR, 0, 500, `${field}.marginR`).errors);
+  pushIf(errors, typeof style.bold !== 'boolean', `${field}.bold`, 'Must be a boolean', style.bold);
+  pushIf(errors, typeof style.italic !== 'boolean', `${field}.italic`, 'Must be a boolean', style.italic);
+  errors.push(...validateEnum(style.position, ['top', 'center', 'bottom'] as const, `${field}.position`).errors);
+
+  return errors;
+}
+
+export function validatePopupCaptionConfig(config: PopupCaptionConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'Must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateSubtitleEntryObject(config.subtitleEntry, 'subtitleEntry'));
+  errors.push(...validateEnum(config.animationType, ['fadeIn', 'scaleIn', 'slideUp', 'bounce'] as const, 'animationType').errors);
+  errors.push(...validateRange(config.animationDuration, 0, 30, 'animationDuration').errors);
+  errors.push(...validateRange(config.holdDuration, 0, 120, 'holdDuration').errors);
+  errors.push(...validateEnum(config.exitAnimation, ['fadeOut', 'scaleOut', 'slideDown'] as const, 'exitAnimation').errors);
+  errors.push(...validateEnum(
+    config.position,
+    [
+      'topLeft',
+      'topCenter',
+      'topRight',
+      'centerLeft',
+      'center',
+      'centerRight',
+      'bottomLeft',
+      'bottomCenter',
+      'bottomRight',
+    ] as const,
+    'position',
+  ).errors);
+
+  if (config.offsetX !== undefined) {
+    pushIf(errors, typeof config.offsetX !== 'number' || !isFinite(config.offsetX), 'offsetX', 'Must be a finite number', config.offsetX);
+  }
+  if (config.offsetY !== undefined) {
+    pushIf(errors, typeof config.offsetY !== 'number' || !isFinite(config.offsetY), 'offsetY', 'Must be a finite number', config.offsetY);
+  }
+  if (config.maxWidth !== undefined) {
+    errors.push(...validateRange(config.maxWidth, 16, 10000, 'maxWidth').errors);
+  }
+  if (config.backgroundColor !== undefined) {
+    errors.push(...validateNonEmpty(config.backgroundColor, 'backgroundColor').errors);
+  }
+  if (config.borderRadius !== undefined) {
+    errors.push(...validateRange(config.borderRadius, 0, 500, 'borderRadius').errors);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateEmojiAnimationConfig(config: EmojiAnimationConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'Must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateFileExists(config.emojiPath, 'emojiPath', ['png', 'webp', 'gif']).errors);
+  errors.push(...validateSubtitleEntryObject(config.subtitleEntry, 'subtitleEntry'));
+  errors.push(...validateEnum(config.animationType, ['float', 'bounce', 'pulse', 'spin'] as const, 'animationType').errors);
+  errors.push(...validateRange(config.animationDuration, 0.05, 30, 'animationDuration').errors);
+  pushIf(errors, !Number.isInteger(config.loopCount) || config.loopCount < 1, 'loopCount', 'Must be an integer >= 1', config.loopCount);
+  errors.push(...validateRange(config.loopDelay, 0, 60, 'loopDelay').errors);
+  errors.push(...validateRange(config.scale, 0.01, 20, 'scale').errors);
+  errors.push(...validateRange(config.opacity, 0, 1, 'opacity').errors);
+  pushIf(errors, !Number.isInteger(config.zIndex) || config.zIndex < 0, 'zIndex', 'Must be an integer >= 0', config.zIndex);
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateDynamicSubtitlesConfig(config: DynamicSubtitlesConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'Must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateSubtitleEntryObject(config.subtitleEntry, 'subtitleEntry'));
+  pushIf(errors, typeof config.wordSyncEnabled !== 'boolean', 'wordSyncEnabled', 'Must be a boolean', config.wordSyncEnabled);
+  errors.push(...validateEnum(config.groupingStrategy, ['none', 'semantic', 'duration', 'importance'] as const, 'groupingStrategy').errors);
+  errors.push(...validateRange(config.minWordDuration, 0.01, 10, 'minWordDuration').errors);
+  errors.push(...validateRange(config.maxWordDuration, 0.01, 10, 'maxWordDuration').errors);
+  errors.push(...validateRange(config.minGroupDuration, 0.01, 30, 'minGroupDuration').errors);
+  errors.push(...validateRange(config.maxGroupDuration, 0.01, 30, 'maxGroupDuration').errors);
+  errors.push(...validateRange(config.groupSensitivity, 0, 1, 'groupSensitivity').errors);
+
+  if (isFinite(config.minWordDuration) && isFinite(config.maxWordDuration)) {
+    pushIf(errors, config.maxWordDuration < config.minWordDuration, 'maxWordDuration', 'Must be >= minWordDuration', config.maxWordDuration);
+  }
+  if (isFinite(config.minGroupDuration) && isFinite(config.maxGroupDuration)) {
+    pushIf(errors, config.maxGroupDuration < config.minGroupDuration, 'maxGroupDuration', 'Must be >= minGroupDuration', config.maxGroupDuration);
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateSubtitleOverlayEntry(entry: SubtitleOverlayEntry): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(entry), 'entry', 'Must be an object', entry);
+  if (!isPlainObject(entry)) return invalid(...errors);
+
+  errors.push(...validateNonEmpty(entry.id, 'id').errors);
+  errors.push(...validateSubtitleEntryObject(entry.subtitleEntry, 'subtitleEntry'));
+
+  if (entry.popupConfig !== undefined) {
+    const r = validatePopupCaptionConfig(entry.popupConfig);
+    errors.push(...r.errors.map(e => ({ ...e, field: `popupConfig.${e.field}` })));
+    if (entry.popupConfig.subtitleEntry.id !== entry.subtitleEntry.id) {
+      errors.push(createError('popupConfig.subtitleEntry', 'Must reference the same subtitleEntry as entry.subtitleEntry', {
+        entrySubtitleId: entry.subtitleEntry.id,
+        popupSubtitleId: entry.popupConfig.subtitleEntry.id,
+      }));
+    }
+  }
+  if (entry.emojiConfig !== undefined) {
+    const r = validateEmojiAnimationConfig(entry.emojiConfig);
+    errors.push(...r.errors.map(e => ({ ...e, field: `emojiConfig.${e.field}` })));
+    if (entry.emojiConfig.subtitleEntry.id !== entry.subtitleEntry.id) {
+      errors.push(createError('emojiConfig.subtitleEntry', 'Must reference the same subtitleEntry as entry.subtitleEntry', {
+        entrySubtitleId: entry.subtitleEntry.id,
+        emojiSubtitleId: entry.emojiConfig.subtitleEntry.id,
+      }));
+    }
+  }
+  if (entry.dynamicConfig !== undefined) {
+    const r = validateDynamicSubtitlesConfig(entry.dynamicConfig);
+    errors.push(...r.errors.map(e => ({ ...e, field: `dynamicConfig.${e.field}` })));
+    if (entry.dynamicConfig.subtitleEntry.id !== entry.subtitleEntry.id) {
+      errors.push(createError('dynamicConfig.subtitleEntry', 'Must reference the same subtitleEntry as entry.subtitleEntry', {
+        entrySubtitleId: entry.subtitleEntry.id,
+        dynamicSubtitleId: entry.dynamicConfig.subtitleEntry.id,
+      }));
+    }
+  }
+
+  return errors.length === 0 ? valid() : invalid(...errors);
+}
+
+export function validateSubtitlePipelineConfig(config: SubtitlePipelineConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+  pushIf(errors, !isPlainObject(config), 'config', 'Must be an object', config);
+  if (!isPlainObject(config)) return invalid(...errors);
+
+  errors.push(...validateFileExists(config.baseInput, 'baseInput', ['mp4', 'webm', 'mkv', 'mov']).errors);
+  errors.push(...validateNonEmpty(config.outputPath, 'outputPath').errors);
+  errors.push(...validateEnum(config.format, ['srt', 'ass', 'vtt'] as const, 'format').errors);
+  errors.push(...validateSubtitleStyleObject(config.style, 'style'));
+
+  if (config.fontPath !== undefined) {
+    errors.push(...validateFileExists(config.fontPath, 'fontPath').errors);
+  }
+
+  pushIf(errors, !Number.isInteger(config.maxOverlays) || config.maxOverlays < 1, 'maxOverlays', 'Must be an integer >= 1', config.maxOverlays);
+  if (Number.isInteger(config.maxOverlays)) {
+    pushIf(errors, config.maxOverlays > MAX_OVERLAYS, 'maxOverlays', `Must be <= ${MAX_OVERLAYS}`, config.maxOverlays);
+  }
+
+  pushIf(errors, !Array.isArray(config.entries), 'entries', 'Must be an array', config.entries);
+  if (Array.isArray(config.entries)) {
+    pushIf(errors, config.entries.length > config.maxOverlays, 'entries', `Must be <= maxOverlays (${config.maxOverlays})`, config.entries.length);
+    for (let i = 0; i < Math.min(config.entries.length, Math.max(0, config.maxOverlays)); i++) {
+      const r = validateSubtitleOverlayEntry(config.entries[i]);
+      errors.push(...r.errors.map(e => ({ ...e, field: `entries[${i}].${e.field}` })));
+    }
   }
 
   return errors.length === 0 ? valid() : invalid(...errors);

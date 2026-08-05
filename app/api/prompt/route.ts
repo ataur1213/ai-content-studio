@@ -3,7 +3,8 @@ import { enhancePrompt } from "@/app/lib/ai-service";
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const body = await req.json();
+    const prompt = body.prompt as string;
 
     const improvedPrompt = await enhancePrompt(prompt);
 

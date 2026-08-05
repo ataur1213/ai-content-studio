@@ -8,6 +8,7 @@
 
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import type {
   FilePath,
   StudioConfig,
@@ -20,7 +21,6 @@ import {
   TEMP_FILE_PREFIX,
   TEMP_VIDEO_EXT,
   TEMP_AUDIO_EXT,
-  TEMP_IMAGE_EXT,
   TEMP_SUBTITLE_EXT,
   VIDEO_FORMAT_MAP,
   AUDIO_FORMAT_MAP,
@@ -357,7 +357,7 @@ export function validateDirPath(dirPath: FilePath, label: string = 'Directory'):
   }
   const resolved = resolvePath(dirPath);
   try {
-    const stat = require('fs').statSync(resolved);
+    const stat = fs.statSync(resolved);
     if (!stat.isDirectory()) {
       return `${label} is not a directory: ${resolved}`;
     }

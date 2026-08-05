@@ -8,13 +8,11 @@
 import type {
   Resolution,
   VideoCodec,
-  AudioCodec,
   VideoFormat,
   AudioFormat,
   ImageFormat,
   SubtitleFormat,
   AspectRatio,
-  HardwareAccelType,
   LogLevel,
   RenderStatus,
   TransitionType,

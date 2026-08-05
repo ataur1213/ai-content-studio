@@ -7,14 +7,18 @@ import type {
   ComposeConfig,
   ComposeResult,
   RenderConfig,
-  VideoMetadata,
   TimelineClip,
+  VideoFilter,
+  ClipTransition,
+  TransitionType,
+  KenBurnsDirection,
 } from './types';
 import {
   DEFAULT_AUDIO_BITRATE,
 } from './constants';
 import {
   removeFilesAsync,
+  fileSize,
 } from './utils';
 import {
   tempVideoPath,
@@ -48,6 +52,7 @@ import {
 } from './outro';
 import {
   mergeVoiceWithMusic,
+  addBackgroundMusic,
 } from './audio';
 import {
   render,
@@ -55,6 +60,85 @@ import {
 import {
   setVideoMetadata,
 } from './seo';
+import {
+  probeDuration,
+} from './probe';
+
+// =============================================================================
+// Integration Helpers — Bridge ComposeConfig types to engine modules
+// =============================================================================
+
+const VALID_KEN_BURNS_DIRECTIONS: ReadonlySet<KenBurnsDirection> = new Set<KenBurnsDirection>([
+  'zoomIn', 'zoomOut', 'panLeft', 'panRight', 'panUp', 'panDown',
+  'diagonalTL', 'diagonalTR', 'diagonalBL', 'diagonalBR',
+]);
+
+const VALID_TRANSITION_TYPES: ReadonlySet<TransitionType> = new Set<TransitionType>([
+  'fade', 'fadeblack', 'fadewhite', 'dissolve',
+  'slideleft', 'slideright', 'slideup', 'slidedown',
+  'circleopen', 'circleclose', 'pixelize',
+  'wipleft', 'wipright', 'wipdown', 'wipup',
+  'none',
+]);
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && isFinite(value);
+}
+
+function findEnabledKenBurnsFilter(clip: TimelineClip): VideoFilter | null {
+  const filter = clip.filters.find((f) => f.type === 'kenburns' && f.enabled);
+  return filter ?? null;
+}
+
+function mapKenBurnsDirection(raw: unknown): KenBurnsDirection {
+  if (isString(raw) && VALID_KEN_BURNS_DIRECTIONS.has(raw as KenBurnsDirection)) {
+    return raw as KenBurnsDirection;
+  }
+  return 'zoomIn';
+}
+
+interface KenBurnsParams {
+  direction: KenBurnsDirection;
+  zoomFactor: number;
+  easing: string;
+}
+
+function extractKenBurnsParams(filter: VideoFilter | null): KenBurnsParams {
+  if (!filter) {
+    return { direction: 'zoomIn', zoomFactor: 1.2, easing: 'easeInOut' };
+  }
+  const p = filter.params;
+  return {
+    direction: mapKenBurnsDirection(p.direction),
+    zoomFactor: isNumber(p.zoomFactor) && p.zoomFactor > 1 ? p.zoomFactor : 1.2,
+    easing: isString(p.easing) && p.easing.length > 0 ? p.easing : 'easeInOut',
+  };
+}
+
+function mapTransitionType(raw: unknown): TransitionType {
+  if (isString(raw) && VALID_TRANSITION_TYPES.has(raw as TransitionType)) {
+    return raw as TransitionType;
+  }
+  return 'none';
+}
+
+function resolveTransition(
+  clipTransition: ClipTransition | null,
+  defaultType: TransitionType,
+  defaultDuration: number,
+): { type: TransitionType; duration: number } {
+  if (!clipTransition) {
+    return { type: defaultType, duration: defaultDuration };
+  }
+  return {
+    type: mapTransitionType(clipTransition.type),
+    duration: isNumber(clipTransition.duration) && clipTransition.duration > 0 ? clipTransition.duration : defaultDuration,
+  };
+}
 
 // =============================================================================
 // Main Compose Entry Point
@@ -83,8 +167,9 @@ export async function composeVideo(
     const processedClips: string[] = [];
     for (const clip of config.clips) {
       if (clip.type === 'image') {
-        const hasKenBurns = clip.filters.some(f => f.type === 'kenburns');
-        if (hasKenBurns) {
+        const kbFilter = findEnabledKenBurnsFilter(clip);
+        if (kbFilter) {
+          const kbParams = extractKenBurnsParams(kbFilter);
           const outPath = tempVideoPath(ctx.tempDir);
           await kenBurnsEffect({
             imagePath: clip.mediaPath,
@@ -92,9 +177,9 @@ export async function composeVideo(
             duration: clip.duration,
             fps: config.fps,
             resolution: config.resolution,
-            direction: 'zoomIn',
-            zoomFactor: 1.2,
-            easing: 'easeInOut',
+            direction: kbParams.direction,
+            zoomFactor: kbParams.zoomFactor,
+            easing: kbParams.easing,
           }, ctx);
           processedClips.push(outPath);
         } else {
@@ -118,22 +203,32 @@ export async function composeVideo(
     // ------------------------------------------------------------------
     // 2. Concatenate clips with or without transitions
     // ------------------------------------------------------------------
-    if (config.defaultTransition !== 'none' && processedClips.length > 1) {
-      ctx.log('info', 'Applying transitions between clips', 'compose');
+    if (processedClips.length > 1) {
+      ctx.log('info', 'Merging clips together', 'compose');
       let mergedPath = processedClips[0];
       
       for (let i = 1; i < processedClips.length; i++) {
+        const clipTransition = resolveTransition(
+          config.clips[i]?.transition ?? null,
+          config.defaultTransition,
+          config.transitionDuration,
+        );
         const outPath = tempVideoPath(ctx.tempDir);
-        await applyTransition({
-          inputA: mergedPath,
-          inputB: processedClips[i],
-          outputPath: outPath,
-          transition: config.defaultTransition,
-          duration: config.transitionDuration,
-          offset: null,
-          resolution: config.resolution,
-          fps: config.fps,
-        }, ctx);
+        if (clipTransition.type === 'none') {
+          await concatClips([mergedPath, processedClips[i]], outPath, ctx);
+        } else {
+          ctx.log('info', `Applying ${clipTransition.type} transition before clip ${i + 1}`, 'compose');
+          await applyTransition({
+            inputA: mergedPath,
+            inputB: processedClips[i],
+            outputPath: outPath,
+            transition: clipTransition.type,
+            duration: clipTransition.duration,
+            offset: null,
+            resolution: config.resolution,
+            fps: config.fps,
+          }, ctx);
+        }
         
         // Cleanup intermediate files (except the very first original clip)
         if (mergedPath !== processedClips[0]) {
@@ -143,13 +238,7 @@ export async function composeVideo(
       }
       currentPath = mergedPath;
     } else {
-      if (processedClips.length > 1) {
-        const outPath = tempVideoPath(ctx.tempDir);
-        await concatClips(processedClips, outPath, ctx);
-        currentPath = outPath;
-      } else {
-        currentPath = processedClips[0];
-      }
+      currentPath = processedClips[0];
     }
 
     // ------------------------------------------------------------------
@@ -225,20 +314,23 @@ export async function composeVideo(
     if (config.voiceTrack || config.backgroundMusic) {
       ctx.log('info', 'Mixing audio (voice & music)', 'compose');
       const nextPath = tempVideoPath(ctx.tempDir);
-      
-      await mergeVoiceWithMusic(
-        currentPath,
-        config.voiceTrack || {
-          voicePath: '',
-          startTime: 0,
-          volume: 1,
-          fadeIn: 0,
-          fadeOut: 0,
-        },
-        config.backgroundMusic,
-        nextPath,
-        ctx,
-      );
+
+      if (config.voiceTrack) {
+        await mergeVoiceWithMusic(
+          currentPath,
+          config.voiceTrack,
+          config.backgroundMusic,
+          nextPath,
+          ctx,
+        );
+      } else {
+        await addBackgroundMusic(
+          currentPath,
+          config.backgroundMusic as NonNullable<typeof config.backgroundMusic>,
+          nextPath,
+          ctx,
+        );
+      }
       tempFiles.push(currentPath);
       currentPath = nextPath;
     }
@@ -284,11 +376,18 @@ export async function composeVideo(
     // ------------------------------------------------------------------
     ctx.log('info', 'Composition completed successfully', 'compose');
 
+    let finalDuration = 0;
+    try {
+      finalDuration = await probeDuration(config.outputPath, ctx);
+    } catch {
+      // Probe failure does not invalidate the successful compose result
+    }
+
     return {
       success: true,
       outputPath: config.outputPath,
-      duration: 0, // Could probe, but unnecessary overhead here
-      fileSize: 0,
+      duration: finalDuration,
+      fileSize: fileSize(config.outputPath),
       error: null,
       tempFiles,
       composeTimeMs: Date.now() - startTimeMs,

@@ -8,6 +8,7 @@ import type {
   ThumbnailConfig,
   ThumbnailResult,
   CommandConfig,
+  ImageFormat,
 } from './types';
 import {
   IMAGE_ENCODER_MAP,
@@ -28,6 +29,15 @@ import {
   probeDuration,
 } from './probe';
 
+const VALID_IMAGE_FORMATS: ReadonlySet<ImageFormat> = new Set<ImageFormat>([
+  'png', 'jpg', 'jpeg', 'webp',
+]);
+
+function normalizeImageFormat(raw: ImageFormat): ImageFormat {
+  if (VALID_IMAGE_FORMATS.has(raw)) return raw;
+  return 'jpg';
+}
+
 // =============================================================================
 // Main Thumbnail Handler
 // =============================================================================
@@ -44,6 +54,8 @@ export async function generateThumbnails(
 ): Promise<ThumbnailResult[]> {
   assertValid(config, validateThumbnailConfig, 'generateThumbnails');
   ensureDir(config.outputDir);
+
+  const normalizedFormat = normalizeImageFormat(config.format);
 
   let targetTimestamps = config.timestamps;
 
@@ -76,10 +88,10 @@ export async function generateThumbnails(
       .replace('{index}', String(index + 1))
       .replace('{timestamp}', formatTime(timestamp).replace(/:/g, '-'));
     
-    const finalFilename = filename.endsWith(`.${config.format}`) ? filename : `${filename}.${config.format}`;
+    const finalFilename = filename.endsWith(`.${normalizedFormat}`) ? filename : `${filename}.${normalizedFormat}`;
     const outputPath = path.join(config.outputDir, finalFilename);
 
-    return extractSingleFrame(config.inputPath, timestamp, outputPath, config.width, config.height, config.format, config.quality, ctx);
+    return extractSingleFrame(config.inputPath, timestamp, outputPath, config.width, config.height, normalizedFormat, config.quality, ctx);
   });
 
   const results = await Promise.all(promises);
@@ -102,11 +114,12 @@ async function extractSingleFrame(
   outputPath: string,
   width: number,
   height: number,
-  format: string,
+  format: ImageFormat,
   quality: number,
   ctx: FFmpegContext,
 ): Promise<ThumbnailResult> {
   // Input seeking (-ss) before input is much faster for single frames
+  const encoder = IMAGE_ENCODER_MAP[format];
   const commandConfig: CommandConfig = {
     binary: ctx.ffmpegPath,
     inputs: [
@@ -141,7 +154,7 @@ async function extractSingleFrame(
         overwrite: true,
         extraArgs: [
           '-frames:v', '1',
-          '-c:v', IMAGE_ENCODER_MAP[format as keyof typeof IMAGE_ENCODER_MAP] || 'mjpeg',
+          '-c:v', encoder,
           '-q:v', String(quality),
           '-s', `${width}x${height}`,
         ],

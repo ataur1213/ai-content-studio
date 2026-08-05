@@ -9,17 +9,13 @@
 import { spawn, ChildProcess } from 'child_process';
 import type {
   CommandConfig,
-  InputConfig,
-  OutputConfig,
   FFmpegError,
   FFmpegContext,
   RenderProgressCallback,
-  RenderProgress,
 } from './types';
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_STDERR_BUFFER,
-  MOV_FASTSTART_FLAGS,
 } from './constants';
 import {
   withRetry,
@@ -31,6 +27,38 @@ import {
   extractErrorMessage,
   createThrottledCallback,
 } from './progress';
+
+// =============================================================================
+// Structured FFmpeg Error — proper Error subclass that implements the
+// FFmpegError interface so rejection reasons pass `instanceof Error` checks
+// while preserving all diagnostic fields (code / stderr / exitCode / etc.).
+// =============================================================================
+
+export class FFmpegEngineError extends Error implements FFmpegError {
+  public readonly code: string;
+  public readonly stderr: string;
+  public readonly exitCode: number | null;
+  public readonly command: string[];
+  public readonly timestamp: number;
+
+  constructor(
+    message: string,
+    code: string,
+    stderr: string,
+    command: string[],
+    exitCode: number | null = null,
+    timestamp?: number,
+  ) {
+    super(message);
+    this.name = 'FFmpegEngineError';
+    this.code = code;
+    this.stderr = stderr;
+    this.exitCode = exitCode;
+    this.command = command;
+    this.timestamp = timestamp ?? Date.now();
+    Object.setPrototypeOf(this, FFmpegEngineError.prototype);
+  }
+}
 
 // =============================================================================
 // Command Execution Options
@@ -90,10 +118,10 @@ export function buildCommandArgs(config: CommandConfig): string[] {
     if (input.format !== null) {
       args.push('-f', input.format);
     }
-    args.push('-i', input.path);
     if (input.extraArgs.length > 0) {
       args.push(...input.extraArgs);
     }
+    args.push('-i', input.path);
   }
 
   // Filter Complex
@@ -120,10 +148,10 @@ export function buildCommandArgs(config: CommandConfig): string[] {
 
     // Bitrates
     if (output.videoBitrate !== null) {
-      args.push('-b:v', output.videoBitrate);
+      args.push('-b:v', String(output.videoBitrate));
     }
     if (output.audioBitrate !== null) {
-      args.push('-b:a', output.audioBitrate);
+      args.push('-b:a', String(output.audioBitrate));
     }
 
     // CRF
@@ -328,7 +356,9 @@ export async function executeFFmpeg(
 // =============================================================================
 
 /**
- * Construct a standardized FFmpegError object.
+ * Construct a standardized FFmpegEngineError (proper Error subclass) so
+ * Promise rejection reasons and thrown values pass `instanceof Error` checks
+ * while preserving all structured diagnostic fields.
  */
 function createError(
   message: string,
@@ -336,15 +366,14 @@ function createError(
   stderrLines: string[],
   config: CommandConfig,
   exitCode: number | null = null,
-): FFmpegError {
-  return {
-    code,
+): FFmpegEngineError {
+  return new FFmpegEngineError(
     message,
-    stderr: stderrLines.join('\n').slice(0, MAX_STDERR_BUFFER),
+    code,
+    stderrLines.join('\n').slice(0, MAX_STDERR_BUFFER),
+    [config.binary, ...buildCommandArgs(config)],
     exitCode,
-    command: [config.binary, ...buildCommandArgs(config)],
-    timestamp: Date.now(),
-  };
+  );
 }
 
 // =============================================================================

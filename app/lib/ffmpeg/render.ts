@@ -16,6 +16,7 @@ import {
 } from './constants';
 import {
   ensureDir,
+  getDirName,
   fileSize,
   removeFileAsync,
 } from './utils';
@@ -52,7 +53,7 @@ export async function render(
 ): Promise<RenderResult> {
   const startTime = Date.now();
   assertValid(config, validateRenderConfig, 'render');
-  ensureDir(config.outputPath);
+  ensureDir(getDirName(config.outputPath));
 
   const execOptions: RenderExecOptions = {
     onProgress,
@@ -69,8 +70,31 @@ export async function render(
       return await renderSinglePass(inputPath, config, ctx, execOptions, startTime);
     }
   } catch (err) {
-    const errorObj = err instanceof Error ? err : new Error(String(err));
-    
+    const errRecord: Record<string, unknown> = (typeof err === 'object' && err !== null) ? err as unknown as Record<string, unknown> : {};
+    const extractedMessage: string =
+      err instanceof Error ? err.message :
+      typeof errRecord.message === 'string' ? errRecord.message :
+      String(err);
+
+    const stderrText: string =
+      err instanceof Error ? typeof (err as unknown as Record<string, unknown>).stderr === 'string' ? (err as unknown as Record<string, unknown>).stderr as string : err.stack ?? '' :
+      typeof errRecord.stderr === 'string' ? errRecord.stderr :
+      '';
+
+    const inheritedCode: string | null =
+      typeof errRecord.code === 'string' ? errRecord.code : null;
+
+    const inheritedExit: number | null =
+      typeof errRecord.exitCode === 'number' ? errRecord.exitCode : null;
+
+    const inheritedCommand: string[] =
+      Array.isArray(errRecord.command) ? errRecord.command as string[] : [];
+
+    const inheritedTimestamp: number | null =
+      typeof errRecord.timestamp === 'number' ? errRecord.timestamp : null;
+
+    const errorObj: Error = err instanceof Error ? err : new Error(extractedMessage);
+
     const result: RenderResult = {
       success: false,
       outputPath: config.outputPath,
@@ -81,18 +105,18 @@ export async function render(
       videoCodec: config.videoCodec,
       audioCodec: config.audioCodec,
       error: {
-        code: 'RENDER_FAILED',
-        message: errorObj.message,
-        stderr: errorObj.stack || '',
-        exitCode: null,
-        command: [],
-        timestamp: Date.now(),
+        code: inheritedCode ?? 'RENDER_FAILED',
+        message: extractedMessage,
+        stderr: stderrText || errorObj.stack || '',
+        exitCode: inheritedExit,
+        command: inheritedCommand,
+        timestamp: inheritedTimestamp ?? Date.now(),
       },
       tempFiles: [],
       renderTimeMs: Date.now() - startTime,
     };
 
-    ctx.log('error', `Render failed: ${errorObj.message}`, 'render');
+    ctx.log('error', `Render failed: ${extractedMessage}`, 'render');
     return result;
   }
 }
@@ -223,8 +247,9 @@ function buildOutputConfig(config: RenderConfig): CommandConfig['outputs'][0] {
   if (config.crf !== null) {
     extra.push('-crf', String(config.crf));
   } else if (config.videoBitrate !== null) {
-    extra.push('-b:v', config.videoBitrate);
+    extra.push('-b:v', String(config.videoBitrate));
   }
+  extra.push('-s', `${config.resolution.width}x${config.resolution.height}`);
 
   return {
     path: config.outputPath,
@@ -238,7 +263,7 @@ function buildOutputConfig(config: RenderConfig): CommandConfig['outputs'][0] {
     tune: config.tune || null,
     pixelFormat: config.pixelFormat,
     fps: config.fps,
-    resolution: config.resolution,
+    resolution: null,
     format: VIDEO_FORMAT_MAP[config.format] || null,
     movFlags: config.format === 'mp4' ? '+faststart' : null,
     metadata: config.metadata || {},
@@ -249,8 +274,11 @@ function buildOutputConfig(config: RenderConfig): CommandConfig['outputs'][0] {
 
 function buildGlobalArgs(config: RenderConfig): string[] {
   const args: string[] = ['-hide_banner'];
-  if (config.hardwareAccel !== 'none') {
-    args.push('-hwaccel', config.hardwareAccel);
+  if ('hardwareAccel' in config) {
+    const hw = config.hardwareAccel;
+    if (typeof hw === 'string' && hw !== 'none') {
+      args.push('-hwaccel', hw);
+    }
   }
   return args;
 }

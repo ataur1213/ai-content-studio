@@ -93,6 +93,14 @@ import {
 import {
   composeVideo,
 } from './compose';
+import {
+  detectScenes,
+  detectSilence,
+  SceneDetectionConfig,
+  SceneDetectionResult,
+  SilenceDetectionConfig,
+  SilenceDetectionResult,
+} from './analyze';
 
 // =============================================================================
 // Main Engine Class
@@ -172,6 +180,22 @@ export class FFmpegStudio {
 
   public async isValidAudio(filePath: string): Promise<boolean> {
     return isValidAudioFile(filePath, this.ensureReady());
+  }
+
+  // =========================================================================
+  // Analysis / Shorts Engine Methods
+  // =========================================================================
+
+  public async detectScenes(
+    config: SceneDetectionConfig,
+  ): Promise<SceneDetectionResult> {
+    return detectScenes(config, this.ensureReady());
+  }
+
+  public async detectSilence(
+    config: SilenceDetectionConfig,
+  ): Promise<SilenceDetectionResult> {
+    return detectSilence(config, this.ensureReady());
   }
 
   // =========================================================================

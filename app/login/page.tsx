@@ -21,7 +21,7 @@ export default function LoginPage() {
     try {
       // Supabase Login এখানে পরে যোগ হবে
       alert("Login system coming next...");
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(error);
       alert("Login failed.");
     }
@@ -79,7 +79,7 @@ export default function LoginPage() {
 
         <div className="text-center mt-6">
           <span className="text-gray-500">
-            Don't have an account?
+            Don&apos;t have an account?
           </span>
 
           <Link

@@ -14,7 +14,6 @@ import type {
 import {
   DEFAULT_RENDER_CONFIG,
   DEFAULT_SUBTITLE_STYLE,
-  SUBTITLE_EXTENSIONS,
 } from './constants';
 import {
   ensureDir,

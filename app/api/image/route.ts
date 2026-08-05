@@ -4,7 +4,8 @@ import { imageHistory } from "@/app/lib/history";
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const body = await req.json();
+    const prompt = body.prompt as string;
 
     if (!prompt) {
       return NextResponse.json(
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const image = await generateImage(prompt);
+    const image = await generateImage({ prompt });
 
     imageHistory.add({
       id: Date.now().toString(),
@@ -29,13 +30,13 @@ export async function POST(req: Request) {
       success: true,
       image,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
 
     return NextResponse.json(
       {
         success: false,
-        message: error?.message || "Image generation failed",
+        message: error instanceof Error ? error.message : "Image generation failed",
       },
       { status: 500 }
     );
